@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Administrador - ITT</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">ITT · Reporte de Incidencias<span>Panel de administrador</span></div>
+    <div class="user">
+      <span id="nombreUsuario"></span>
+      <button onclick="cerrarSesion()">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="sidebar">
+      <button class="active" data-tab="bandeja" onclick="cambiarTab('bandeja')">📥 Bandeja</button>
+      <button data-tab="estadisticas" onclick="cambiarTab('estadisticas')">📊 Estadísticas</button>
+      <button data-tab="personal" onclick="cambiarTab('personal')">👷 Personal</button>
+    </div>
+
+    <main class="contenido">
+      <!-- BANDEJA -->
+      <section id="tab-bandeja">
+        <h2>Bandeja de incidencias</h2>
+        <p class="sub">Clasifica la prioridad y asigna al personal correspondiente</p>
+        <div id="listaBandeja"></div>
+      </section>
+
+      <!-- ESTADISTICAS -->
+      <section id="tab-estadisticas" class="oculto">
+        <h2>Estadísticas generales</h2>
+        <p class="sub">Resumen del estado de todas las incidencias</p>
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="card">
+          <h3 style="margin-top:0;">Distribución por estado</h3>
+          <canvas id="graficaEstados" height="90"></canvas>
+        </div>
+      </section>
+
+      <!-- PERSONAL -->
+      <section id="tab-personal" class="oculto">
+        <h2>Personal de mantenimiento</h2>
+        <p class="sub">Personal disponible para asignar incidencias</p>
+        <div id="listaPersonal"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal: asignar -->
+  <div class="modal-fondo oculto" id="modalFondo">
+    <div class="modal" id="modalAsignar"></div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    const sesion = exigirSesion("administrador");
+    if (sesion) document.getElementById("nombreUsuario").textContent = sesion.nombre;
+    let personalCache = [];
+
+    function cambiarTab(tab) {
+      document.querySelectorAll(".sidebar button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+      ["bandeja","estadisticas","personal"].forEach(t =>
+        document.getElementById("tab-" + t).classList.toggle("oculto", t !== tab));
+      if (tab === "estadisticas") cargarEstadisticas();
+      if (tab === "personal") cargarPersonal();
+    }
+
+    function cerrarModal(){ document.getElementById("modalFondo").classList.add("oculto"); }
+
+    async function cargarBandeja() {
+      const cont = document.getElementById("listaBandeja");
+      cont.innerHTML = '<p class="vacio">Cargando...</p>';
+      try {
+        personalCache = await apiFetch("/admin/personal");
+        const lista = await apiFetch("/admin/bandeja");
+        if (lista.length === 0) { cont.innerHTML = '<p class="vacio">No hay incidencias registradas.</p>'; return; }
+        cont.innerHTML = lista.map(r => `
+          <div class="card card-row">
+            <div>
+              <h3>#${r.folio} — ${r.titulo}</h3>
+              <div class="meta">${r.ubicacion} · ${r.categoria} · ${formatoFecha(r.fecha_creacion)}</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              ${badgePrioridad(r.prioridad)}${badgeEstado(r.estado)}
+              ${r.estado !== "Resuelto"
+                ? `<button class="btn secundario" onclick="abrirAsignar(${r.id}, '${r.prioridad || ""}', ${r.asignado_a_id || "null"})">Clasificar / asignar</button>`
+                : ""}
+            </div>
+          </div>
+        `).join("");
+      } catch (e) {
+        cont.innerHTML = `<p class="vacio">Error al cargar: ${e.message}<br>¿El backend está corriendo en ${API}?</p>`;
+      }
+    }
+
+    function abrirAsignar(id, prioridadActual, asignadoActual) {
+      const opciones = personalCache.map(p =>
+        `<option value="${p.id}" ${p.id === asignadoActual ? "selected" : ""}>${p.nombre} (${p.no_control})</option>`
+      ).join("");
+      document.getElementById("modalAsignar").innerHTML = `
+        <h3>Clasificar / asignar incidencia</h3>
+        <div class="field">
+          <label>Prioridad</label>
+          <select id="selPrioridad">
+            <option value="Baja" ${prioridadActual === "Baja" ? "selected" : ""}>Baja</option>
+            <option value="Media" ${prioridadActual === "Media" ? "selected" : ""}>Media</option>
+            <option value="Alta" ${prioridadActual === "Alta" ? "selected" : ""}>Alta</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Asignar a</label>
+          <select id="selPersonal">${opciones || "<option disabled>No hay personal registrado</option>"}</select>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn secundario" style="flex:1;" onclick="cerrarModal()">Cancelar</button>
+          <button class="btn" style="flex:1;" onclick="guardarAsignacion(${id})">Guardar</button>
+        </div>
+      `;
+      document.getElementById("modalFondo").classList.remove("oculto");
+    }
+
+    async function guardarAsignacion(id) {
+      try {
+        await apiFetch(`/admin/incidencias/${id}/asignar`, {
+          method: "POST",
+          body: JSON.stringify({
+            prioridad: document.getElementById("selPrioridad").value,
+            asignado_a_id: parseInt(document.getElementById("selPersonal").value),
+          }),
+        });
+        cerrarModal();
+        cargarBandeja();
+      } catch (e) { alert("No se pudo asignar: " + e.message); }
+    }
+
+    async function cargarPersonal() {
+      const cont = document.getElementById("listaPersonal");
+      cont.innerHTML = '<p class="vacio">Cargando...</p>';
+      try {
+        const lista = await apiFetch("/admin/personal");
+        if (lista.length === 0) { cont.innerHTML = '<p class="vacio">No hay personal de mantenimiento registrado.</p>'; return; }
+        cont.innerHTML = lista.map(p => `
+          <div class="card card-row">
+            <div><h3>${p.nombre}</h3><div class="meta">No. control: ${p.no_control}</div></div>
+            <span class="badge" style="background:#e0e7ff;color:#4338ca;">Mantenimiento</span>
+          </div>
+        `).join("");
+      } catch (e) {
+        cont.innerHTML = `<p class="vacio">Error al cargar: ${e.message}</p>`;
+      }
+    }
+
+    async function cargarEstadisticas() {
+      const grid = document.getElementById("statsGrid");
+      grid.innerHTML = '<p class="vacio">Cargando...</p>';
+      try {
+        const s = await apiFetch("/admin/estadisticas");
+        grid.innerHTML = `
+          <div class="stat-card"><div class="num">${s.total}</div><div class="label">Total</div></div>
+          <div class="stat-card"><div class="num">${s.resueltas}</div><div class="label">Resueltas</div></div>
+          <div class="stat-card"><div class="num">${s.pendientes}</div><div class="label">Pendientes</div></div>
+          <div class="stat-card"><div class="num">${s.promedio_respuesta_dias ?? "-"}</div><div class="label">Prom. resp. (días)</div></div>
+        `;
+        dibujarGrafica(s);
+      } catch (e) {
+        grid.innerHTML = `<p class="vacio">Error al cargar estadísticas: ${e.message}</p>`;
+      }
+    }
+
+    function dibujarGrafica(s) {
+      const canvas = document.getElementById("graficaEstados");
+      const ctx = canvas.getContext("2d");
+      canvas.width = canvas.clientWidth; canvas.height = 90;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const datos = [
+        { label: "Pendiente", valor: s.pendientes, color: "#64748b" },
+        { label: "En proceso", valor: s.en_proceso, color: "#d97706" },
+        { label: "Resuelto", valor: s.resueltas, color: "#16a34a" },
+      ];
+      const max = Math.max(1, ...datos.map(d => d.valor));
+      const anchoBarra = 70, espacio = 40;
+      datos.forEach((d, i) => {
+        const alto = (d.valor / max) * 60;
+        const x = 30 + i * (anchoBarra + espacio);
+        ctx.fillStyle = d.color;
+        ctx.fillRect(x, 70 - alto, anchoBarra, alto);
+        ctx.fillStyle = "#1e293b";
+        ctx.font = "12px Segoe UI";
+        ctx.fillText(d.label + " (" + d.valor + ")", x, 85);
+      });
+    }
+
+    if (sesion) cargarBandeja();
+  </script>
+</body>
+</html>

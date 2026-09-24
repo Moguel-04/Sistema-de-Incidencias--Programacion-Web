@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Alumno - ITT</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">ITT · Reporte de Incidencias<span>Panel de alumno</span></div>
+    <div class="user">
+      <span id="nombreUsuario"></span>
+      <button onclick="cerrarSesion()">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <main class="contenido" style="max-width:760px;margin:0 auto;">
+    <div class="card-row" style="margin-bottom:18px;">
+      <div>
+        <h2 style="margin:0;">Mis reportes</h2>
+        <p class="sub" style="margin:0;">Consulta el estado de tus incidencias reportadas</p>
+      </div>
+      <button class="btn" onclick="abrirModal()">+ Registrar incidencia</button>
+    </div>
+
+    <div id="listaReportes"></div>
+  </main>
+
+  <!-- Modal: registrar incidencia (pantalla 4) -->
+  <div class="modal-fondo oculto" id="modalFondo">
+    <div class="modal" id="modalRegistrar">
+      <h3>Registrar incidencia</h3>
+      <form id="formIncidencia">
+        <div class="field"><label>Título</label><input type="text" id="titulo" required></div>
+        <div class="field"><label>Descripción</label><textarea id="descripcion" required></textarea></div>
+        <div class="field"><label>Ubicación</label><input type="text" id="ubicacion" required></div>
+        <div class="field"><label>Categoría</label>
+          <select id="categoria">
+            <option>Infraestructura</option>
+            <option>Eléctrico</option>
+            <option>Seguridad</option>
+            <option>Mobiliario</option>
+            <option>Otro</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+          <button type="button" class="btn secundario" onclick="cerrarModal()" style="flex:1;">Cancelar</button>
+          <button type="submit" class="btn" style="flex:1;">Enviar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: confirmación de envío (pantalla 5) -->
+  <div class="modal-fondo oculto" id="modalConfirmFondo">
+    <div class="modal" style="text-align:center;">
+      <div style="font-size:40px;">✅</div>
+      <h3>Reporte enviado</h3>
+      <p class="sub" id="folioTexto"></p>
+      <button class="btn" onclick="cerrarConfirmacion()">Ver mis reportes</button>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    const sesion = exigirSesion("alumno");
+    if (sesion) document.getElementById("nombreUsuario").textContent = sesion.nombre;
+
+    function abrirModal(){ document.getElementById("modalFondo").classList.remove("oculto"); }
+    function cerrarModal(){ document.getElementById("modalFondo").classList.add("oculto"); document.getElementById("formIncidencia").reset(); }
+    function cerrarConfirmacion(){ document.getElementById("modalConfirmFondo").classList.add("oculto"); cargarReportes(); }
+
+    async function cargarReportes() {
+      const cont = document.getElementById("listaReportes");
+      cont.innerHTML = '<p class="vacio">Cargando...</p>';
+      try {
+        const reportes = await apiFetch("/incidencias/mias");
+        if (reportes.length === 0) {
+          cont.innerHTML = '<p class="vacio">Aún no has registrado ninguna incidencia.</p>';
+          return;
+        }
+        cont.innerHTML = reportes.map(r => `
+          <div class="card card-row">
+            <div>
+              <h3>Reporte #${r.folio} — ${r.titulo}</h3>
+              <div class="meta">${r.ubicacion} · ${r.categoria} · ${formatoFecha(r.fecha_creacion)}</div>
+            </div>
+            ${badgeEstado(r.estado)}
+          </div>
+        `).join("");
+      } catch (e) {
+        cont.innerHTML = `<p class="vacio">Error al cargar reportes: ${e.message}<br>¿El backend está corriendo en ${API}?</p>`;
+      }
+    }
+
+    document.getElementById("formIncidencia").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const nueva = await apiFetch("/incidencias", {
+          method: "POST",
+          body: JSON.stringify({
+            titulo: document.getElementById("titulo").value,
+            descripcion: document.getElementById("descripcion").value,
+            ubicacion: document.getElementById("ubicacion").value,
+            categoria: document.getElementById("categoria").value,
+          }),
+        });
+        cerrarModal();
+        document.getElementById("folioTexto").textContent = "Folio #" + nueva.folio;
+        document.getElementById("modalConfirmFondo").classList.remove("oculto");
+      } catch (err) {
+        alert("No se pudo enviar el reporte: " + err.message);
+      }
+    });
+
+    if (sesion) cargarReportes();
+  </script>
+</body>
+</html>

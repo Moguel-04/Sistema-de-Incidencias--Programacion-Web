@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Mantenimiento - ITT</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">ITT · Reporte de Incidencias<span>Panel de mantenimiento</span></div>
+    <div class="user">
+      <span id="nombreUsuario"></span>
+      <button onclick="cerrarSesion()">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <main class="contenido" style="max-width:760px;margin:0 auto;">
+    <h2>Incidencias asignadas</h2>
+    <p class="sub">Actualiza el avance y marca como resuelto cuando termines</p>
+    <div id="listaAsignadas"></div>
+  </main>
+
+  <!-- Modal: detalle de incidencia (pantalla 7) -->
+  <div class="modal-fondo oculto" id="modalFondo">
+    <div class="modal" id="modalDetalle"></div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    const sesion = exigirSesion("mantenimiento");
+    if (sesion) document.getElementById("nombreUsuario").textContent = sesion.nombre;
+
+    function cerrarModal(){ document.getElementById("modalFondo").classList.add("oculto"); }
+
+    async function cargarAsignadas() {
+      const cont = document.getElementById("listaAsignadas");
+      cont.innerHTML = '<p class="vacio">Cargando...</p>';
+      try {
+        const lista = await apiFetch("/incidencias/asignadas");
+        if (lista.length === 0) {
+          cont.innerHTML = '<p class="vacio">No tienes incidencias pendientes por atender. 🎉</p>';
+          return;
+        }
+        cont.innerHTML = lista.map(r => `
+          <div class="card card-row" style="cursor:pointer" onclick="verDetalle(${r.id})">
+            <div>
+              <h3>#${r.folio} — ${r.titulo}</h3>
+              <div class="meta">${r.ubicacion} · ${formatoFecha(r.fecha_creacion)}</div>
+            </div>
+            <div style="display:flex;gap:8px;">${badgePrioridad(r.prioridad)}${badgeEstado(r.estado)}</div>
+          </div>
+        `).join("");
+      } catch (e) {
+        cont.innerHTML = `<p class="vacio">Error al cargar: ${e.message}<br>¿El backend está corriendo en ${API}?</p>`;
+      }
+    }
+
+    async function verDetalle(id) {
+      const r = await apiFetch("/incidencias/" + id);
+      document.getElementById("modalDetalle").innerHTML = `
+        <h3>#${r.folio} — ${r.titulo}</h3>
+        <p class="sub" style="margin-top:-8px;">${r.ubicacion} · ${r.categoria}</p>
+        <p>${r.descripcion}</p>
+        <div class="field">
+          <label>Notas de avance</label>
+          <textarea id="notasAvance">${r.notas_avance || ""}</textarea>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn secundario" style="flex:1;" onclick="cerrarModal()">Cerrar</button>
+          <button class="btn" style="flex:1;" onclick="guardarAvance(${id})">Guardar avance</button>
+        </div>
+        ${r.estado !== "Resuelto"
+          ? `<button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#16a34a,#22c55e);" onclick="resolver(${id})">Marcar resuelto</button>`
+          : `<p style="text-align:center;color:#16a34a;font-weight:600;margin-top:10px;">✓ Ya está resuelto</p>`}
+      `;
+      document.getElementById("modalFondo").classList.remove("oculto");
+    }
+
+    async function guardarAvance(id) {
+      try {
+        await apiFetch(`/incidencias/${id}/avance`, {
+          method: "POST",
+          body: JSON.stringify({ notas_avance: document.getElementById("notasAvance").value }),
+        });
+        cerrarModal();
+        cargarAsignadas();
+      } catch (e) { alert("No se pudo guardar: " + e.message); }
+    }
+
+    async function resolver(id) {
+      if (!confirm("¿Marcar esta incidencia como resuelta?")) return;
+      try {
+        await apiFetch(`/incidencias/${id}/resolver`, { method: "POST" });
+        cerrarModal();
+        cargarAsignadas();
+      } catch (e) { alert("No se pudo actualizar: " + e.message); }
+    }
+
+    if (sesion) cargarAsignadas();
+  </script>
+</body>
+</html>

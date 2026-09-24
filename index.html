@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITT - Reporte de Incidencias</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="login-page">
+  <div class="login-box">
+    <h1>ITT · Reporte de Incidencias</h1>
+    <p>Instituto Tecnológico de Tijuana</p>
+
+    <div class="error" id="error"></div>
+
+    <form id="formLogin">
+      <div class="field">
+        <label>No. de control</label>
+        <input type="text" id="noControl" placeholder="22211616" required>
+      </div>
+      <div class="field">
+        <label>Contraseña</label>
+        <input type="password" id="password" placeholder="••••••" required>
+      </div>
+      <button type="submit" class="btn">Iniciar sesión</button>
+    </form>
+
+    <div class="demo">
+      Cuentas de prueba (usuario / contraseña):<br>
+      Alumno: 22211616 / 1234 · Mantenimiento: M001 / 1234 · Admin: A001 / 1234
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    document.getElementById("formLogin").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorBox = document.getElementById("error");
+      errorBox.style.display = "none";
+
+      const no_control = document.getElementById("noControl").value.trim();
+      const password = document.getElementById("password").value;
+
+      try {
+        const resp = await fetch(API + "/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ no_control, password }),
+        });
+        const datos = await resp.json();
+        if (!resp.ok) throw new Error(datos.error || "No se pudo iniciar sesión");
+
+        guardarSesion(datos);
+        if (datos.rol === "alumno") window.location.href = "alumno.html";
+        else if (datos.rol === "mantenimiento") window.location.href = "mantenimiento.html";
+        else window.location.href = "admin.html";
+
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.style.display = "block";
+      }
+    });
+
+    // si ya hay sesión activa, redirigir directo a su panel
+    const s = obtenerSesion();
+    if (s) {
+      if (s.rol === "alumno") window.location.href = "alumno.html";
+      else if (s.rol === "mantenimiento") window.location.href = "mantenimiento.html";
+      else window.location.href = "admin.html";
+    }
+  </script>
+</body>
+</html>
